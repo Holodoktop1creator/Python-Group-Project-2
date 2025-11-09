@@ -15,7 +15,8 @@ PREVIOUS_PUBLISHED_DATE = '2025-01-01'
 
 OUT_CSV = 'book.csv'
 
-FIELDS = ["author", "created_date", "description", "price", "publisher", "title", "rank"]
+FIELDS = ["author", "created_date", "description", "price", "publisher", "title", "rank", "dagger",
+           "weeks_on_list", "normal_list_ends_at"]
 
 
 def fetch_week(api_key, published_date):

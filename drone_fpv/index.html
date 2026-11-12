@@ -1149,7 +1149,7 @@ function toPad() {
   D.pos.copy(PAD).add(new THREE.Vector3(0, 0.2, 0)); D.vel.set(0, 0, 0);
   D.yaw = Math.atan2(-(roadPts[VILLAGE_I].x - PAD.x), -(roadPts[VILLAGE_I].z - PAD.z));
   D.q.setFromEuler(new THREE.Euler(0, D.yaw, 0, 'YXZ'));
-  D.armed = false; D.alive = true; D.hp = 100; D.mah = 0; D.volt = 16.8; D.thr = 0; D.thrAcc = 0; D.warhead = false; D.flown = 0; D.landed = true; D.acroThr = -1; D.start = G.time;
+  D.armed = false; D.alive = true; D.disabled = false; G.glitch = 0; G.lostT = 0; D.hp = 100; D.mah = 0; D.volt = 16.8; D.thr = 0; D.thrAcc = 0; D.warhead = false; D.flown = 0; D.landed = true; D.acroThr = -1; D.start = G.time;
   sticks.L.y = mode === 'acro' ? -1 : 0; sticks.L.sticky = -1;
   $('#gl').classList.remove('scout');
   updateArmBtn();
@@ -1281,8 +1281,10 @@ bindStick($('#stickL'), sticks.L, true);
 bindStick($('#stickR'), sticks.R, false);
 
 const keys = new Set();
+// по физической клавише, чтобы работало и в русской раскладке
+const keyName = e => /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : e.key.toLowerCase();
 addEventListener('keydown', e => {
-  SND.init(); const k = e.key.toLowerCase(); keys.add(k);
+  SND.init(); const k = keyName(e); keys.add(k);
   if (G.state === 'menu' || G.paused) return;
   if (k === ' ') { arm(!D.armed); e.preventDefault(); }
   if (k === 'e') manualBoom();
@@ -1290,7 +1292,7 @@ addEventListener('keydown', e => {
   if (k === 'c') toggleCam();
   if (k === 'p' || k === 'escape') pause(true);
 });
-addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('keyup', e => keys.delete(keyName(e)));
 let padPrev = [];
 const kb = { thr: 0, yaw: 0, roll: 0, pitch: 0 };      // сглаженные оси клавиатуры
 const mouse = { on: false, x: 0, y: 0 };               // мышь как правый стик (ПКМ включает)

@@ -158,6 +158,12 @@ h2{font-family:var(--f-display);font-weight:400;font-size:clamp(26px,4.4vw,40px)
         <div id="briefGoals"></div>
       </div>
       <div>
+        <h3>АППАРАТ</h3>
+        <div class="seg" id="typeSeg"></div>
+        <p id="typeDesc" style="margin-top:8px"></p>
+        <p><span id="typeCount"></span></p>
+      </div>
+      <div>
         <h3>ПУЛЬТ (MODE 2)</h3>
         <p><b>Левый стик:</b> вверх-вниз газ, влево-вправо поворот.</p>
         <p><b>Правый стик:</b> наклон вперёд, назад и вбок.</p>
@@ -1064,7 +1070,7 @@ function updateTracers(dt) {
 const D = {
   pos: new THREE.Vector3(), vel: new THREE.Vector3(), q: new THREE.Quaternion(), yaw: 0,
   thr: 0, thrAcc: 0, armed: false, alive: true, hp: 100, mah: 0, volt: 16.8, amps: 0,
-  warhead: false, flown: 0, landed: true, acroThr: -1, start: 0
+  warhead: false, flown: 0, landed: true, acroThr: -1, start: 0, speed: 0, pitch: 0, roll: 0, fuel: 0
 };
 const MAXACC = 37;
 const droneModel = new THREE.Group();
@@ -1077,6 +1083,32 @@ const droneModel = new THREE.Group();
   for (const [x, z] of [[0.11, 0.11], [-0.11, 0.11], [0.11, -0.11], [-0.11, -0.11]]) { const p = new THREE.Mesh(new THREE.CircleGeometry(0.065, 16), pm); p.rotation.x = -Math.PI / 2; p.position.set(x, 0.03, z); droneModel.add(p); }
   droneModel.scale.setScalar(2.2);
   scene.add(droneModel);
+}
+
+// Типы аппаратов (названия вымышленные)
+const TYPES = {
+  quad:    { name: 'FPV-квадрокоптер', short: 'FPV', desc: 'Манёвренный, умеет зависать. Малая БЧ: танк бей в крышу или корму. Связь слабеет с расстоянием.', blast: 7, hp: 100, k: 1 },
+  wing:    { name: 'Крыло «Сапсан»', short: 'КРЫЛО', desc: 'Дальнобойный барражирующий аппарат. Летит только вперёд, 140–250 км/ч, поворачивает креном. Мощная БЧ, связь через спутник, 4 минуты полёта.',
+             plane: true, vmin: 38, vmax: 70, cruise: 50, blast: 15, hp: 140, k: 0.67, endurance: 240, alt: 70, maxRoll: 1.05, maxPitch: 0.6, heavy: true, fov: 92, back: 13 },
+  missile: { name: 'Ракета «Копьё»', short: 'РАКЕТА', desc: 'Управляемая ракета с телекамерой. 500–650 км/ч, всего 45 секунд полёта. Пробивает любую броню, но промах не прощает.',
+             plane: true, rocket: true, vmin: 140, vmax: 180, cruise: 160, blast: 18, hp: 60, k: 0.5, endurance: 45, alt: 170, heavy: true, fov: 70, back: 16 }
+};
+const MODELS = { quad: droneModel, wing: new THREE.Group(), missile: new THREE.Group() };
+{
+  const grey = new THREE.MeshStandardMaterial({ color: col('#8d9196'), roughness: 0.7, metalness: 0.2, side: THREE.DoubleSide });
+  const dark = new THREE.MeshStandardMaterial({ color: col('#2a2c2f'), roughness: 0.8 });
+  // крыло-дельта
+  const wg = new THREE.BufferGeometry();
+  wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, -1.5, -1.25, 0, 1.1, 1.25, 0, 1.1]), 3)); wg.computeVertexNormals();
+  MODELS.wing.add(mesh(wg, grey));
+  const fus = mesh(new THREE.CylinderGeometry(0.13, 0.2, 3.2, 10), grey); fus.rotation.x = -Math.PI / 2; fus.position.z = -0.2; MODELS.wing.add(fus);
+  for (const x of [-1.25, 1.25]) { const fin = mesh(BOX, grey); fin.scale.set(0.04, 0.45, 0.6); fin.position.set(x, 0.1, 0.85); MODELS.wing.add(fin); }
+  const prop = new THREE.Mesh(new THREE.CircleGeometry(0.45, 16), new THREE.MeshBasicMaterial({ color: col('#cccccc'), transparent: true, opacity: 0.3, side: THREE.DoubleSide })); prop.position.z = 1.45; MODELS.wing.add(prop);
+  // ракета
+  const body = mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.6, 10), grey); body.rotation.x = Math.PI / 2; MODELS.missile.add(body);
+  const nose = mesh(new THREE.ConeGeometry(0.12, 0.5, 10), dark); nose.rotation.x = -Math.PI / 2; nose.position.z = -1.55; MODELS.missile.add(nose);
+  for (const a of [0, Math.PI / 2]) { const f = mesh(BOX, dark); f.scale.set(0.9, 0.02, 0.4); f.rotation.z = a; f.position.z = 1.05; MODELS.missile.add(f); }
+  for (const k of ['wing', 'missile']) { MODELS[k].visible = false; scene.add(MODELS[k]); }
 }
 
 const wind = new THREE.Vector3(rand(-2.5, 2.5), 0, rand(-2.5, 2.5));
@@ -1094,13 +1126,13 @@ const MISSIONS = [
   { id: 'tanks', name: 'Охота на танки', sub: 'Три танка с охранением прорываются к мосту.', drones: 6, time: 330, need: 3, convoy: ['apc', 'tank', 'tank', 'aa', 'tank'], tankHunt: true,
     goals: ['Уничтожить 3 танка (каждому нужно 2 попадания в лоб или 1 в крышу/корму).', 'Динамическая защита держит лобовые удары.', 'Пикируй сверху, это верная победа.'] }
 ];
-const G = { state: 'menu', mis: null, kills: 0, killsNeed: 0, dronesLeft: 0, dronesUsed: 0, time: 0, score: 0, escaped: 0, camMode: 'fpv', stateT: 0, gates: [], gateI: 0, lap: 0, paused: false, msg: '', msgT: 0, scout: null, lastHit: '', speedT: 1 };
+const G = { state: 'menu', mis: null, kills: 0, killsNeed: 0, dronesLeft: 0, dronesUsed: 0, time: 0, score: 0, escaped: 0, camMode: 'fpv', type: store.get('type', 'quad'), stateT: 0, gates: [], gateI: 0, lap: 0, paused: false, msg: '', msgT: 0, scout: null, lastHit: '', speedT: 1 };
 
 function clearUnits() { for (const u of units) scene.remove(u.g); units = []; for (const b of burners) b.t = 0; burners.length = 0; }
 function setupMission(mis) {
   clearUnits(); for (const t of tracers) { t.on = false; t.m.visible = false; }
   for (const g of G.gates) scene.remove(g.m); G.gates = [];
-  G.mis = mis; G.kills = 0; G.killsNeed = mis.need; G.dronesLeft = mis.drones; G.dronesUsed = 0; G.time = 0; G.score = 0; G.escaped = 0; G.gateI = 0; G.lap = 0;
+  G.mis = mis; G.kills = 0; G.killsNeed = mis.need; G.dronesLeft = mis.train ? 99 : Math.ceil(mis.drones * TYPES[G.type].k); G.dronesUsed = 0; G.time = 0; G.score = 0; G.escaped = 0; G.gateI = 0; G.lap = 0;
   wind.set(rand(-2.5, 2.5), 0, rand(-2.5, 2.5));
   if (mis.convoy) {
     const s0 = ROAD_LEN * 0.07;
@@ -1144,20 +1176,29 @@ function toPad() {
   D.q.setFromEuler(new THREE.Euler(0, D.yaw, 0, 'YXZ'));
   D.armed = false; D.alive = true; D.disabled = false; G.glitch = 0; G.lostT = 0; D.hp = 100; D.mah = 0; D.volt = 16.8; D.thr = 0; D.thrAcc = 0; D.warhead = false; D.flown = 0; D.landed = true; D.acroThr = -1; D.start = G.time;
   sticks.L.y = mode === 'acro' ? -1 : 0; sticks.L.sticky = -1;
+  const T = TYPES[G.type];
+  for (const k in MODELS) MODELS[k].visible = false;
+  D.hp = T.hp;
+  if (T.plane) {
+    D.pos.copy(PAD).add(new THREE.Vector3(0, T.alt, 0)); D.landed = false;
+    D.pitch = 0; D.roll = 0; D.speed = T.cruise; D.fuel = T.endurance; sticks.L.y = 0;
+  }
   $('#gl').classList.remove('scout');
   updateArmBtn();
-  say(mode === 'acro' ? 'ВЗВЕДИ МОТОРЫ: ВЗЛЁТ, затем газ' : 'ВЗЛЁТ, затем левый стик вверх', 4);
+  say(T.plane ? 'ПРОБЕЛ — ПУСК' : mode === 'acro' ? 'ВЗВЕДИ МОТОРЫ: ВЗЛЁТ, затем газ' : 'ВЗЛЁТ, затем левый стик вверх', 4);
 }
 function arm(on) {
   if (G.state !== 'pad' && G.state !== 'fly') return;
-  if (on && mode === 'acro' && sticks.L.y > -0.85) { say('Сначала опусти газ вниз', 2); SND.beep(300, 0.15); return; }
+  const T = TYPES[G.type];
+  if (T.plane && !on) return;                      // крыло и ракету не остановить
+  if (on && !T.plane && mode === 'acro' && sticks.L.y > -0.85) { say('Сначала опусти газ вниз', 2); SND.beep(300, 0.15); return; }
   D.armed = on;
   if (on && G.state === 'pad') { G.dronesUsed++; if (G.dronesLeft < 90) G.dronesLeft--; }
   if (on) { G.state = 'fly'; SND.beep(1200, 0.08); setTimeout(() => SND.beep(1600, 0.08), 110); }
   else SND.beep(500, 0.12);
   updateArmBtn();
 }
-function updateArmBtn() { const b = $('#bArm'); b.classList.toggle('on', D.armed); b.textContent = D.armed ? 'СТОП' : 'ВЗЛЁТ'; }
+function updateArmBtn() { const b = $('#bArm'); b.classList.toggle('on', D.armed); b.textContent = TYPES[G.type].plane ? (D.armed ? 'В ПОЛЁТЕ' : 'ПУСК') : D.armed ? 'СТОП' : 'ВЗЛЁТ'; }
 
 function droneHit(dmg) {
   if (!D.alive) return;
@@ -1173,8 +1214,9 @@ function detonate(hitUnit, reason) {
   const p = D.pos.clone();
   const results = [];
   if (D.warhead) {
-    explosionFx(p, 1.4);
-    SND.boom(1.2, 0); buzz(160);
+    const T = TYPES[G.type], B = T.blast;
+    explosionFx(p, B / 5);
+    SND.boom(B / 6, 0); buzz(160);
     for (const u of units) {
       if (!u.alive) continue;
       const dist = u.pos.distanceTo(p);
@@ -1185,11 +1227,11 @@ function detonate(hitUnit, reason) {
           const local = p.clone().applyMatrix4(u.inv);
           const top = local.y > u.d.half[1] * 1.55 || D.vel.y < -0.55 * D.vel.length();
           const rear = local.z < -u.d.half[2] * 0.55;
-          if (top) how = 'В КРЫШУ'; else if (rear) how = 'В КОРМУ'; else { dmg = 1; how = 'ДЗ СРАБОТАЛА'; }
+          if (T.heavy) how = 'БРОНЯ ПРОБИТА'; else if (top) how = 'В КРЫШУ'; else if (rear) how = 'В КОРМУ'; else { dmg = 1; how = 'ДЗ СРАБОТАЛА'; }
         }
-      } else if (dist < 7 && !u.d.armor) {
-        dmg = u.t === 'apc' || u.t === 'aa' ? (dist < 3.5 ? 1 : 0) : 1; how = 'ОСКОЛКИ';
-      }
+      } else if (dist < B && !u.d.armor) {
+        dmg = u.t === 'apc' || u.t === 'aa' ? (dist < B * 0.5 ? 1 : 0) : 1; how = 'ОСКОЛКИ';
+      } else if (dist < 5 && u.d.armor && T.heavy) { dmg = 1; how = 'БЛИЗКИЙ РАЗРЫВ'; }
       if (dmg > 0) { u.hp -= dmg; if (u.hp <= 0) { killUnit(u); results.push(`${u.d.name}: ${how}, УНИЧТОЖЕН`); } else results.push(`${u.d.name}: ${how}, ПОВРЕЖДЁН`); }
     }
     if (!results.length) results.push(reason === 'manual' ? 'ПОДРЫВ: ЦЕЛЬ НЕ ПОРАЖЕНА' : 'ПРОМАХ');
@@ -1324,6 +1366,7 @@ function readInput(dt) {
   return inp;
 }
 function toggleMode() {
+  if (TYPES[G.type].plane) { say('Режимы СТАБ/АКРО только у квадрокоптера', 2); return; }
   mode = mode === 'angle' ? 'acro' : 'angle';
   $('#bMode').textContent = mode === 'acro' ? 'АКРО' : 'СТАБ';
   $('#bMode').classList.toggle('on', mode === 'acro');
@@ -1345,8 +1388,39 @@ $('#bPause').addEventListener('click', () => pause(true));
    ===================================================================== */
 const _up = new THREE.Vector3(), _fw = new THREE.Vector3(), _e = new THREE.Euler(), _qd = new THREE.Quaternion(), _w = new THREE.Vector3();
 const expo = (s, e) => s * (1 - e) + s * s * s * e;
+function stepPlane(dt, inp, T) {
+  if (!D.armed && !D.disabled) return;             // висит на пусковой до команды
+  D.fuel -= dt;
+  const steer = inp.roll + inp.yaw * 0.6;
+  if (D.disabled) { D.roll += dt * 3.5; D.pitch = lerp(D.pitch, -1.2, 1 - Math.exp(-dt)); }
+  else if (T.rocket) {
+    D.yaw -= clamp(steer, -1, 1) * 0.6 * dt;
+    D.pitch = clamp(D.pitch - inp.pitch * 0.65 * dt, -1.35, 0.9);
+    D.roll = lerp(D.roll, -clamp(steer, -1, 1) * 0.35, 1 - Math.exp(-dt * 4));
+  } else {
+    D.roll = lerp(D.roll, -clamp(steer, -1, 1) * T.maxRoll, 1 - Math.exp(-dt * 3));
+    D.pitch = lerp(D.pitch, -inp.pitch * T.maxPitch, 1 - Math.exp(-dt * 2.5));
+    D.yaw += 9.81 * Math.tan(D.roll) / Math.max(D.speed, 20) * dt;      // координированный разворот
+  }
+  if (D.fuel <= 0 && !D.disabled) { D.pitch = lerp(D.pitch, -0.9, 1 - Math.exp(-dt * 0.6)); if (G.msgT <= 0) say('ТОПЛИВО КОНЧИЛОСЬ', 1); }
+  D.q.setFromEuler(_e.set(D.pitch, D.yaw, D.roll, 'YXZ'));
+  _up.set(0, 1, 0).applyQuaternion(D.q);
+  _fw.set(0, 0, -1).applyQuaternion(D.q);
+  const want = D.fuel <= 0 || D.disabled ? T.vmin * 0.6 : lerp(T.vmin, T.vmax, clamp((inp.thr + 1) / 2, 0, 1));
+  D.speed += (want - D.speed) * 0.8 * dt - 9.81 * _fw.y * 0.6 * dt;
+  D.speed = clamp(D.speed, T.vmin * 0.5, T.vmax * 1.25);
+  D.thr = clamp((D.speed - T.vmin) / (T.vmax - T.vmin), 0, 1); D.amps = 0;
+  D.vel.copy(_fw).multiplyScalar(D.speed).addScaledVector(wind, 0.3);
+  const prev = D.pos.clone();
+  D.pos.addScaledVector(D.vel, dt);
+  D.flown += prev.distanceTo(D.pos);
+  if (!D.warhead && D.flown > 60) { D.warhead = true; say('БЧ ВЗВЕДЕНА', 1.5); SND.beep(1800, 0.05); }
+  if (Math.abs(D.pos.x) > HALF - 5 || Math.abs(D.pos.z) > HALF - 5 || D.pos.y > 900) { say('АППАРАТ УШЁЛ ИЗ ЗОНЫ', 2); D.warhead = false; detonate(null, 'signal'); G.state = 'lost'; G.stateT = 0; return; }
+  collide(prev);
+}
 function stepDrone(dt, inp) {
   if (!D.alive) return;
+  if (TYPES[G.type].plane) return stepPlane(dt, inp, TYPES[G.type]);
   // заряд
   const capacity = 1500;
   const left = clamp(1 - D.mah / capacity, 0, 1);
@@ -1557,6 +1631,7 @@ function signal() {
   let jam = 0;
   for (const u of units) if (u.alive && u.d.ew) jam = Math.max(jam, 1 - smoothstep(60, 320, u.pos.distanceTo(D.pos)));
   q *= 1 - jam * 0.82;
+  if (TYPES[G.type].plane) q = Math.max(q, 0.9) * (1 - jam * 0.35);
   return { q: clamp(q, 0, 1), d, jam };
 }
 
@@ -1573,31 +1648,32 @@ function updateCamera(dt) {
     camera.position.set(c.x + Math.cos(menuT) * 260, groundY(c.x, c.z) + 110, c.z + Math.sin(menuT) * 260);
     camera.lookAt(c.x, groundY(c.x, c.z) + 10, c.z);
     camera.fov = 60; camera.updateProjectionMatrix();
-    droneModel.visible = false;
+    for (const k in MODELS) MODELS[k].visible = false;
     return;
   }
   if (G.state === 'scout' && G.scout) {
     camera.position.lerp(G.scout.from, 1);
     camera.lookAt(G.scout.target);
     camera.fov = 16; camera.updateProjectionMatrix();
-    droneModel.visible = false;
+    for (const k in MODELS) MODELS[k].visible = false;
     return;
   }
-  const fovWant = G.camMode === 'fpv' ? 108 : 75;
+  const T = TYPES[G.type], model = MODELS[G.type];
+  const fovWant = G.camMode === 'fpv' ? (T.fov || 108) : 75;
   if (camera.fov !== fovWant) { camera.fov = fovWant; camera.updateProjectionMatrix(); }
-  droneModel.position.copy(D.pos); droneModel.quaternion.copy(D.q);
+  model.position.copy(D.pos); model.quaternion.copy(D.q);
   if (G.camMode === 'fpv') {
-    droneModel.visible = false;
-    tiltQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), CFG.camTilt * Math.PI / 180);
+    model.visible = false;
+    tiltQ.setFromAxisAngle(new THREE.Vector3(1, 0, 0), T.plane ? 0 : CFG.camTilt * Math.PI / 180);
     camQ.copy(D.q).multiply(tiltQ);
     camera.position.copy(D.pos).add(new THREE.Vector3(0, 0.06, -0.1).applyQuaternion(D.q));
     camera.quaternion.copy(camQ);
     if (G.glitch > 0) { camera.position.x += rand(-0.05, 0.05); camera.position.y += rand(-0.05, 0.05); }
   } else {
-    droneModel.visible = true;
+    model.visible = true;
     const e = new THREE.Euler().setFromQuaternion(D.q, 'YXZ');
-    const back = new THREE.Vector3(Math.sin(e.y), 0, Math.cos(e.y)).multiplyScalar(5.5);
-    const want = D.pos.clone().add(back).add(new THREE.Vector3(0, 1.8, 0));
+    const back = new THREE.Vector3(Math.sin(e.y), 0, Math.cos(e.y)).multiplyScalar(T.back || 5.5);
+    const want = D.pos.clone().add(back).add(new THREE.Vector3(0, T.plane ? 3.5 : 1.8, 0));
     want.y = Math.max(want.y, groundY(want.x, want.z) + 0.8);
     chasePos.lerp(want, G.stateT < 0.1 ? 1 : 1 - Math.exp(-dt * 6));
     chasePos.y = Math.max(chasePos.y, groundY(chasePos.x, chasePos.z) + 0.8);
@@ -1658,7 +1734,7 @@ function drawOSD(sig, shaderNoise) {
   // авиагоризонт
   if (D.alive) {
     oc.save(); oc.translate(cx, cy); oc.rotate(e.z);
-    const off = e.x * 260 - CFG.camTilt * 4.5;
+    const off = e.x * 260 - (TYPES[G.type].plane ? 0 : CFG.camTilt * 4.5);
     oc.strokeStyle = 'rgba(255,255,255,.85)'; oc.lineWidth = 2;
     oc.beginPath(); oc.moveTo(-90, off); oc.lineTo(-30, off); oc.moveTo(30, off); oc.lineTo(90, off); oc.stroke();
     oc.restore();
@@ -1702,7 +1778,8 @@ function drawOSD(sig, shaderNoise) {
   }
 
   // верх
-  const modeTxt = (mode === 'acro' ? 'ACRO' : 'ANGLE') + (D.armed ? '  ARMED' : '  DISARMED');
+  const TP = TYPES[G.type];
+  const modeTxt = (TP.plane ? TP.short : mode === 'acro' ? 'ACRO' : 'ANGLE') + (D.armed ? '  ARMED' : TP.plane ? '  ГОТОВ К ПУСКУ' : '  DISARMED');
   txt(modeTxt, 16, T, 'left', fs, D.armed ? '#ffffff' : '#ffb547');
   txt(D.warhead ? 'БЧ: ВЗВЕДЕНА' : 'БЧ: БЕЗОПАСНО', 16, T + fs + 6, 'left', fs, D.warhead ? '#ff8a6c' : '#cfcfcf');
   const lq = Math.round(sig.q * 100);
@@ -1722,8 +1799,14 @@ function drawOSD(sig, shaderNoise) {
   // низ (между стиками)
   const by = H - 22;
   const vWarn = D.volt < 14.0 && Math.floor(performance.now() / 300) % 2;
-  txt(`${D.volt.toFixed(1)}В ${Math.round(D.mah)}мАч`, cx - 8, by - fs - 6, 'right', fs, vWarn ? '#ff5a3c' : '#ffffff');
-  txt(`${Math.round(D.amps)}А  ГАЗ ${Math.round(D.thr * 100)}%`, cx + 8, by - fs - 6, 'left', fs);
+  if (TP.plane) {
+    const low = D.fuel < TP.endurance * 0.2 && Math.floor(performance.now() / 300) % 2;
+    txt(`ТОПЛИВО ${fmtTime(Math.max(0, D.fuel))}`, cx - 8, by - fs - 6, 'right', fs, low ? '#ff5a3c' : '#ffffff');
+    txt(`ТЯГА ${Math.round(D.thr * 100)}%`, cx + 8, by - fs - 6, 'left', fs);
+  } else {
+    txt(`${D.volt.toFixed(1)}В ${Math.round(D.mah)}мАч`, cx - 8, by - fs - 6, 'right', fs, vWarn ? '#ff5a3c' : '#ffffff');
+    txt(`${Math.round(D.amps)}А  ГАЗ ${Math.round(D.thr * 100)}%`, cx + 8, by - fs - 6, 'left', fs);
+  }
   // дом
   const hx = OPERATOR.x - D.pos.x, hz = OPERATOR.z - D.pos.z;
   const homeA = Math.atan2(hx, hz) - e.y + Math.PI;
@@ -1731,7 +1814,7 @@ function drawOSD(sig, shaderNoise) {
   oc.save(); oc.translate(cx + 22, by - 5); oc.rotate(-homeA); oc.fillStyle = '#fff'; oc.strokeStyle = '#000'; oc.lineWidth = 2;
   oc.beginPath(); oc.moveTo(0, -8); oc.lineTo(6, 6); oc.lineTo(0, 3); oc.lineTo(-6, 6); oc.closePath(); oc.stroke(); oc.fill(); oc.restore();
   txt(fmtTime(Math.max(0, G.time - D.start)), cx + 36, by, 'left', fs);
-  if (D.hp < 100) txt(`КОРПУС ${Math.round(D.hp)}%`, cx, by - fs * 2 - 12, 'center', fs, '#ff8a6c');
+  if (D.hp < TP.hp) txt(`КОРПУС ${Math.round(D.hp / TP.hp * 100)}%`, cx, by - fs * 2 - 12, 'center', fs, '#ff8a6c');
 
   // сообщения
   if (G.msgT > 0) txt(G.msg, cx, cy + Math.min(110, H * 0.22), 'center', fs + 3, '#ffd08a');
@@ -1766,6 +1849,15 @@ function openBrief(m) {
   $('#briefTitle').textContent = m.name;
   $('#briefText').textContent = m.sub;
   $('#briefGoals').innerHTML = m.goals.map(g => `<p>${g}</p>`).join('');
+  const seg = $('#typeSeg'); seg.innerHTML = '';
+  const sync = () => {
+    seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.t === G.type));
+    const T = TYPES[G.type];
+    $('#typeDesc').textContent = T.desc;
+    $('#typeCount').textContent = m.train ? 'На полигоне запас не ограничен.' : `На эту миссию: ${Math.ceil(m.drones * T.k)} шт.` + (T.plane ? ' Пуск с воздуха, W/S — скорость.' : '');
+  };
+  for (const k in TYPES) { const b = document.createElement('button'); b.dataset.t = k; b.textContent = TYPES[k].name; b.addEventListener('click', () => { G.type = k; store.set('type', k); sync(); }); seg.appendChild(b); }
+  sync();
   show('#brief');
 }
 function startMission(m) {

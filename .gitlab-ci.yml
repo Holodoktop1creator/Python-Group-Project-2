@@ -1,0 +1,14 @@
+# GitLab Pages: публикует игры как сайт. Ссылка появится в Deploy -> Pages.
+pages:
+  stage: deploy
+  image: alpine:3.20
+  script:
+    - mkdir -p public/fpv public/mobile
+    - cp drone_fpv/index.html public/fpv/index.html
+    - cp drone_war/index.html public/mobile/index.html
+    - cp gitlab_pages_index.html public/index.html
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
